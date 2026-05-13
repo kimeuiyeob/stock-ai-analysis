@@ -20,6 +20,15 @@ st.set_page_config(page_title="Financial AI", page_icon="📈", layout="wide")
 
 st.markdown("""
 <style>
+/* selectbox 테두리 */
+[data-testid="stSelectbox"] > div > div {
+    border: 1px solid rgba(128, 128, 128, 0.4) !important;
+    border-radius: 6px !important;
+}
+[data-testid="stSelectbox"] > div > div:focus-within {
+    border-color: rgba(128, 128, 128, 0.8) !important;
+}
+
 @media (max-width: 768px) {
     /* 페이지 좌우 여백 축소 */
     .block-container {
@@ -74,6 +83,14 @@ st.markdown("""
 
 def _signal_icon(signal: str) -> str:
     return {"buy": "🟢", "hold": "🟡", "sell": "🔴"}.get((signal or "").lower(), "⚪")
+
+
+def _fmt_price(p: float) -> str:
+    if p >= 1000:
+        return f"${p:,.0f}"
+    if p >= 100:
+        return f"${p:.0f}"
+    return f"${p:.2f}"
 
 
 def _signal_badge(signal: str) -> str:
@@ -247,13 +264,13 @@ if page == "📊 대시보드":
                     )
 
                 p1, p2, p3 = st.columns(3)
+                upside = None
+                if sig["target_price"] and sig["current_price"]:
+                    upside = (sig["target_price"] / sig["current_price"] - 1) * 100
                 if sig["current_price"]:
-                    upside = None
-                    if sig["target_price"] and sig["current_price"]:
-                        upside = (sig["target_price"] / sig["current_price"] - 1) * 100
                     p1.metric(
-                        "현재가", f"${sig['current_price']:,.1f}",
-                        delta=f"{upside:+.1f}% 목표" if upside is not None else None,
+                        "현재가", _fmt_price(sig["current_price"]),
+                        delta=f"{upside:+.0f}%" if upside is not None else None,
                         help=(
                             "분석 시점의 시장 거래가입니다.\n"
                             "△ 수치는 목표가 대비 예상 상승여력을 나타냅니다."
@@ -261,7 +278,7 @@ if page == "📊 대시보드":
                     )
                 if sig["target_price"]:
                     p2.metric(
-                        "목표가", f"${sig['target_price']:,.1f}",
+                        "목표가", _fmt_price(sig["target_price"]),
                         help=(
                             "AI 리포트에서 추출한 12개월 기준 목표주가입니다.\n"
                             "① 방향 검증 — 매수 신호인데 목표가가 현재가 이하면 폐기\n"
@@ -272,7 +289,7 @@ if page == "📊 대시보드":
                     )
                 if sig["stop_loss"]:
                     p3.metric(
-                        "손절가", f"${sig['stop_loss']:,.1f}",
+                        "손절가", _fmt_price(sig["stop_loss"]),
                         help=(
                             "14일 ATR(평균 실질 변동폭) × 2배를 현재가에서 차감하여 산출합니다.\n"
                             "변동성이 클수록 손절 폭이 넓어지고, 안정적인 종목은 좁게 설정됩니다.\n"
