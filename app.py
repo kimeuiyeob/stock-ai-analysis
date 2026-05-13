@@ -18,6 +18,58 @@ TRACKING_CSV = ROOT / "tracking" / "prediction_log.csv"
 
 st.set_page_config(page_title="Financial AI", page_icon="📈", layout="wide")
 
+st.markdown("""
+<style>
+@media (max-width: 768px) {
+    /* 페이지 좌우 여백 축소 */
+    .block-container {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+        padding-top: 1rem !important;
+    }
+    /* 컬럼 세로 쌓기 */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+    [data-testid="column"] {
+        min-width: 100% !important;
+        width: 100% !important;
+    }
+    /* 버튼 터치 영역 확대 */
+    .stButton > button {
+        width: 100% !important;
+        min-height: 2.75rem !important;
+        font-size: 1rem !important;
+    }
+    /* 메트릭 가독성 */
+    [data-testid="stMetricValue"] {
+        font-size: 1.3rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.8rem !important;
+    }
+    /* 텍스트 입력 터치 최적화 */
+    .stTextInput input {
+        font-size: 1rem !important;
+        min-height: 2.5rem !important;
+    }
+    /* 로그 코드블록 가로 스크롤 */
+    pre {
+        font-size: 0.72rem !important;
+        overflow-x: auto !important;
+    }
+    /* 데이터프레임 가로 스크롤 허용 */
+    [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+    }
+    /* 구분선 여백 */
+    hr {
+        margin: 0.5rem 0 !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ── 공통 헬퍼 ────────────────────────────────────────────────────────
 
 def _signal_icon(signal: str) -> str:
