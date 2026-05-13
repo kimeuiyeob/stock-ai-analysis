@@ -194,6 +194,18 @@ if page == "📊 대시보드":
 
     st.markdown("---")
 
+    # 종목 목차
+    toc_items = []
+    for sig in signals:
+        icon = _signal_icon(sig["signal"])
+        anchor = f"{sig['ticker'].lower()}-{sig['date']}"
+        toc_items.append(
+            f'<a href="#{anchor}" style="text-decoration:none;color:inherit;font-weight:bold">'
+            f'{icon} {sig["ticker"]}</a>'
+        )
+    st.markdown(" &nbsp;&nbsp; ".join(toc_items), unsafe_allow_html=True)
+    st.markdown("---")
+
     # 종목 카드 (3열)
     for row_start in range(0, len(signals), 3):
         row_sigs = signals[row_start: row_start + 3]
