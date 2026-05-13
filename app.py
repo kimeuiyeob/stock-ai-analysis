@@ -151,6 +151,7 @@ if "pl" not in st.session_state:
         "logs": [],
         "returncode": None,
         "tickers": "",
+        "rerun_done": False,  # 완료 시 rerun 중복 방지
     }
 pl = st.session_state.pl
 
@@ -459,6 +460,7 @@ elif page == "🚀 주식 분석":
         pl["returncode"] = None
         pl["running"] = True
         pl["tickers"] = ", ".join(tickers)
+        pl["rerun_done"] = False
 
         def _bg(cmd, root, pl):
             proc = subprocess.Popen(
@@ -484,26 +486,67 @@ elif page == "🚀 주식 분석":
         st.warning("티커를 입력하세요.")
 
     # ── 로그 표시 (fragment로 격리 — 이 영역만 1초마다 갱신) ──────────
-    @st.fragment(run_every=1)
+    @st.fragment(run_every=1 if pl["running"] else None)
     def _log_panel():
         _pl = st.session_state.pl
         if not _pl["logs"] and not _pl["running"]:
             return
         if _pl["tickers"]:
             st.markdown(f"**실행 종목**: `{_pl['tickers']}`")
-        st.code("\n".join(_pl["logs"][-60:]), language=None)
-        if _pl["running"]:
-            st.info("⏳ 실행 중... 다른 페이지를 둘러봐도 계속 진행됩니다.")
+
+        logs_text = "\n".join(_pl["logs"])
+
+        is_batch = "," in _pl.get("tickers", "")
+        rc = _pl["returncode"]
+
+        # 단일 티커 알려진 에러 → 로그 없이 깔끔한 메시지만
+        if not _pl["running"] and not is_batch and rc not in (None, 0):
+            if "[지원불가 종목]" in logs_text:
+                line = next((l for l in _pl["logs"] if "[지원불가 종목]" in l), "")
+                st.error(line.split("[지원불가 종목]")[-1].strip())
+            elif "가격 이력이 비어 있습니다" in logs_text or "no price data found" in logs_text or "possibly delisted" in logs_text or "Quote not found" in logs_text:
+                st.error("티커를 찾을 수 없습니다. 올바른 티커인지 확인하세요. (예: AAPL, TSLA, NVDA, 005930.KS)")
+            else:
+                st.code("\n".join(_pl["logs"][-60:]), language=None)
+                st.error("오류가 발생했습니다. 로그를 확인하세요.")
         else:
-            rc = _pl["returncode"]
-            if rc == 0:
+            # 실행 중 / 배치 / 성공 → 로그 표시
+            st.code("\n".join(_pl["logs"][-60:]), language=None)
+            if _pl["running"]:
+                st.info("⏳ 실행 중... 다른 페이지를 둘러봐도 계속 진행됩니다.")
+            elif is_batch:
+                total = len(_pl["tickers"].split(","))
+                failed_info: dict[str, str] = {}
+                for line in _pl["logs"]:
+                    if "[pipeline] [오류]" in line:
+                        rest = line.split("[pipeline] [오류]")[-1].strip()
+                        t, _, msg = rest.partition(":")
+                        t, msg = t.strip(), msg.strip()
+                        if "[지원불가 종목]" in msg:
+                            msg = msg.split("[지원불가 종목]")[-1].strip().split(". ")[0] + "."
+                        elif "가격 이력이 비어" in msg or "수집 실패" in msg or "Not Found" in msg:
+                            msg = "티커를 찾을 수 없습니다."
+                        failed_info[t] = msg
+                success_n = total - len(failed_info)
+                summary_md = (
+                    f"**분석 티커** {total}개 &nbsp;|&nbsp; "
+                    f"**성공** {success_n}개 &nbsp;|&nbsp; "
+                    f"**실패** {len(failed_info)}개"
+                )
+                if not failed_info:
+                    st.success(f"✅ {summary_md}")
+                else:
+                    st.warning(f"⚠️ {summary_md}")
+                    fail_lines = "\n".join(f"- **{t}** — {r}" for t, r in failed_info.items())
+                    st.markdown(f"**실패 내역**\n{fail_lines}")
+            elif rc == 0:
                 st.success("✅ 완료! 대시보드에서 결과를 확인하세요.")
             elif rc is not None:
-                logs_text = "\n".join(_pl["logs"])
-                if "가격 이력이 비어 있습니다" in logs_text or "no price data found" in logs_text or "possibly delisted" in logs_text or "Quote not found" in logs_text:
-                    st.error("❌ 티커를 찾을 수 없습니다. 올바른 티커인지 확인하세요.\n\n(예: AAPL, TSLA, NVDA, 005930.KS)")
-                else:
-                    st.error("❌ 오류가 발생했습니다. 로그를 확인하세요.")
+                st.error("오류가 발생했습니다. 로그를 확인하세요.")
+
+        if not _pl["running"] and rc is not None and not _pl.get("rerun_done"):
+            _pl["rerun_done"] = True
+            st.rerun()
 
     _log_panel()
 

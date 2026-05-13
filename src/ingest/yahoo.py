@@ -186,6 +186,7 @@ class YahooIngester:
 
         keys_info = [
             "longName",
+            "quoteType",
             "sector",
             "industry",
             "marketCap",

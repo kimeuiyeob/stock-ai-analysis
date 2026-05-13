@@ -41,6 +41,23 @@ class CollectAgent(BaseAgent):
         write_json(raw_dir / "yfinance.json", yf_data)
         self.log(f"  → raw/yfinance.json 저장 (종가≈{yf_data['price']['current']})")
 
+        # ── 종목 유형 검증 — ETF·레버리지·펀드는 재무 데이터 없어 분석 불가
+        _UNSUPPORTED = {"ETF", "MUTUALFUND", "CRYPTOCURRENCY", "FUTURE", "INDEX"}
+        quote_type = yf_data.get("info", {}).get("quoteType", "").upper()
+        if quote_type in _UNSUPPORTED:
+            type_label = {
+                "ETF": "ETF/레버리지 상품",
+                "MUTUALFUND": "뮤추얼 펀드",
+                "CRYPTOCURRENCY": "암호화폐",
+                "FUTURE": "선물",
+                "INDEX": "지수",
+            }.get(quote_type, quote_type)
+            raise ValueError(
+                f"[지원불가 종목] {ticker}는 {type_label}입니다. "
+                "재무제표·EPS 등 필수 데이터가 없어 분석할 수 없습니다. "
+                "개별 주식 티커를 입력해 주세요. (예: AAPL, TSLA, NVDA)"
+            )
+
         company_name: str = yf_data.get("info", {}).get("longName", ticker)
 
         # ── 2단계: 나머지 5개 병렬 수집 ─────────────────────────────────────
