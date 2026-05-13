@@ -246,7 +246,7 @@ case "$MODE" in
         info "Streamlit 대시보드 시작 중..."
         ok "브라우저에서 http://localhost:8501 로 접속하세요"
         hr
-        streamlit run app.py --server.port 8501
+        streamlit run app.py --server.port 8501 --server.address 0.0.0.0
         ;;
     2)
         echo ""

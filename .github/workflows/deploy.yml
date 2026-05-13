@@ -1,0 +1,43 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          envs: ENV_FILE
+          script: |
+            set -e
+            cd ~/financial-ai
+
+            # 최신 코드 pull
+            git pull origin master
+
+            # .env 파일 생성 (Secrets에서 주입)
+            echo "$ENV_FILE" > .env
+
+            # 가상환경 활성화 및 패키지 업데이트
+            source .venv/bin/activate
+            pip install -r requirements.txt --quiet
+
+            # 기존 Streamlit 프로세스 종료
+            pkill -f "streamlit run app.py" || true
+
+            # Streamlit 재시작 (백그라운드)
+            nohup streamlit run app.py \
+              --server.port 8501 \
+              --server.address 0.0.0.0 \
+              > ~/streamlit.log 2>&1 &
+
+            echo "배포 완료"
