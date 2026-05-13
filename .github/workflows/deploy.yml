@@ -32,14 +32,30 @@ jobs:
             source .venv/bin/activate
             pip install -r requirements.txt --quiet
 
-            # 기존 Streamlit 프로세스 종료
-            pkill -f "streamlit run app.py" || true
+            # systemd 서비스 등록 (최초 1회)
+            sudo tee /etc/systemd/system/financial-ai.service > /dev/null <<EOF
+            [Unit]
+            Description=Financial AI Streamlit
+            After=network.target
 
-            # Streamlit 재시작 (백그라운드 — SSH 세션 종료 후에도 유지)
-            nohup streamlit run app.py \
+            [Service]
+            User=ec2-user
+            WorkingDirectory=/home/ec2-user/financial-ai
+            EnvironmentFile=/home/ec2-user/financial-ai/.env
+            ExecStart=/home/ec2-user/financial-ai/.venv/bin/streamlit run app.py \
               --server.port 8501 \
-              --server.address 0.0.0.0 \
-              > ~/streamlit.log 2>&1 &
-            disown $!
+              --server.address 0.0.0.0
+            Restart=always
+            RestartSec=5
+            StandardOutput=append:/home/ec2-user/streamlit.log
+            StandardError=append:/home/ec2-user/streamlit.log
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            sudo systemctl daemon-reload
+            sudo systemctl enable financial-ai
+            sudo systemctl restart financial-ai
 
             echo "배포 완료"
