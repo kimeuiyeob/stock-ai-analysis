@@ -35,6 +35,18 @@ class SignalAgent(BaseAgent):
         root = input_data["root"]
         quant_score: dict = input_data.get("quant_score", {})
 
+        # 데이터 완성도에 따라 퀀트 점수를 중립(50)으로 당김
+        # completeness=1.0 → 원점수 유지 / completeness=0.5 → 원점수와 50의 중간
+        raw_score = quant_score.get("score")
+        completeness = quant_score.get("data_completeness", 1.0)
+        if raw_score is not None and completeness < 1.0:
+            adjusted = raw_score * completeness + 50 * (1 - completeness)
+            quant_score = {**quant_score, "score": round(adjusted, 1)}
+            self.log(
+                f"  퀀트 점수 보정: {raw_score} → {quant_score['score']} "
+                f"(데이터 완성도 {completeness:.0%})"
+            )
+
         self.log("투자 신호 추출 및 CSV 기록")
         current_price: float | None = snapshot.get("price", {}).get("current")
         at = snapshot.get("analyst_targets") or {}
