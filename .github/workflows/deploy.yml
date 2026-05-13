@@ -12,11 +12,17 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
-          envs: ENV_FILE
+          envs: OPENAI_API_KEY,NEWS_API_KEY,FRED_API_KEY,FINNHUB_API_KEY,ALPHA_VANTAGE_API_KEY
           script: |
             set -e
             cd ~/financial-ai
@@ -25,8 +31,14 @@ jobs:
             git reset --hard HEAD
             git pull origin master
 
-            # .env 파일 생성 (Secrets에서 주입)
-            echo "$ENV_FILE" > .env
+            # .env 파일 생성 (각 Secret을 개별 변수로 주입)
+            cat > .env <<EOF
+            OPENAI_API_KEY=${OPENAI_API_KEY}
+            NEWS_API_KEY=${NEWS_API_KEY}
+            FRED_API_KEY=${FRED_API_KEY}
+            FINNHUB_API_KEY=${FINNHUB_API_KEY}
+            ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+            EOF
 
             # 가상환경 활성화 및 패키지 업데이트
             source .venv/bin/activate
