@@ -21,7 +21,8 @@ jobs:
             set -e
             cd ~/financial-ai
 
-            # 최신 코드 pull
+            # 최신 코드 pull (로컬 변경사항 무시)
+            git reset --hard HEAD
             git pull origin master
 
             # .env 파일 생성 (Secrets에서 주입)
