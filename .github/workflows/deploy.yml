@@ -35,10 +35,11 @@ jobs:
             # 기존 Streamlit 프로세스 종료
             pkill -f "streamlit run app.py" || true
 
-            # Streamlit 재시작 (백그라운드)
+            # Streamlit 재시작 (백그라운드 — SSH 세션 종료 후에도 유지)
             nohup streamlit run app.py \
               --server.port 8501 \
               --server.address 0.0.0.0 \
               > ~/streamlit.log 2>&1 &
+            disown $!
 
             echo "배포 완료"
