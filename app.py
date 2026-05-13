@@ -20,6 +20,11 @@ st.set_page_config(page_title="Financial AI", page_icon="📈", layout="wide")
 
 st.markdown("""
 <style>
+/* metric 값 글자 살짝 축소 */
+[data-testid="stMetricValue"] {
+    font-size: 1.6rem !important;
+}
+
 /* selectbox 테두리 */
 [data-testid="stSelectbox"] > div > div {
     border: 1px solid rgba(128, 128, 128, 0.4) !important;
@@ -86,10 +91,8 @@ def _signal_icon(signal: str) -> str:
 
 
 def _fmt_price(p: float) -> str:
-    if p >= 1000:
+    if p >= 1:
         return f"${p:,.0f}"
-    if p >= 100:
-        return f"${p:.0f}"
     return f"${p:.2f}"
 
 
