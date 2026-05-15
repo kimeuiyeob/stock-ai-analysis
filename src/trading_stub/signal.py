@@ -16,7 +16,8 @@ class TradingSignal:
     risk_triggers: list[str]
     source_report: str
     date: str
-    target_price: float | None = None
+    target_price: float | None = None           # AI가 재무 분석으로 산출한 목표가
+    analyst_target_price: float | None = None   # 월가 애널리스트 컨센서스 목표가
     stop_loss: float | None = None
     quant_score: int | None = None
     quant_breakdown: dict | None = field(default=None)
@@ -62,9 +63,9 @@ def _extract_section_bullets(report_text: str, section_keyword: str) -> list[str
 
 
 def _extract_structured_signal(report_text: str) -> dict[str, Any] | None:
-    """리포트 마지막 ```json 블록에서 구조화 신호를 추출한다."""
+    """리포트 첫 번째 유효한 ```json 신호 블록에서 구조화 신호를 추출한다."""
     matches = list(re.finditer(r"```json\s*(\{.*?\})\s*```", report_text, re.S))
-    for m in reversed(matches):
+    for m in matches:
         try:
             data = json.loads(m.group(1))
             if isinstance(data.get("signal"), str) and data["signal"].lower() in ("buy", "hold", "sell"):
@@ -74,64 +75,25 @@ def _extract_structured_signal(report_text: str) -> dict[str, Any] | None:
     return None
 
 
-def _reconcile_signals(
-    llm_signal: str | None,
-    quant_signal: str,
-    quant_confidence: float,
-) -> tuple[str, float]:
-    """LLM 신호와 퀀트 신호를 결합해 최종 방향·신뢰도를 결정한다."""
-    if llm_signal is None:
-        return quant_signal, quant_confidence
 
-    if llm_signal == quant_signal:
-        return llm_signal, min(0.95, round(quant_confidence * 1.15, 4))
-
-    if llm_signal == "hold" or quant_signal == "hold":
-        directional = llm_signal if quant_signal == "hold" else quant_signal
-        return directional, max(0.35, round(quant_confidence * 0.70, 4))
-
-    # 완전 반대(buy vs sell) → 불확실, hold로 처리
-    return "hold", 0.35
-
-
-def _validate_target_price(
+def _validate_ai_target_price(
     llm_target: float | None,
     current_price: float,
-    analyst_mean: float | None,
     signal: str,
 ) -> tuple[float | None, str | None]:
-    """LLM 목표가 검증. 문제 있으면 (보정값, 경고메시지) 반환."""
+    """AI 목표가 기본 검증. 실패 시 None 반환 (애널리스트값 대체 없음)."""
     if llm_target is None or current_price <= 0:
-        return analyst_mean, "LLM 목표가 없음 → 애널리스트 컨센서스 사용"
+        return None, "AI 목표가 없음"
 
-    warning: str | None = None
-
-    # 1. 신호 방향 일치 확인
+    # 신호 방향 불일치
     if signal == "buy" and llm_target < current_price * 0.98:
-        warning = f"buy 신호이나 목표가({llm_target:.1f})가 현재가({current_price:.1f}) 이하"
-        return analyst_mean or llm_target, warning
-
+        return None, f"buy 신호이나 목표가({llm_target:.1f})가 현재가({current_price:.1f}) 이하"
     if signal == "sell" and llm_target > current_price * 1.02:
-        warning = f"sell 신호이나 목표가({llm_target:.1f})가 현재가({current_price:.1f}) 이상"
-        return analyst_mean or llm_target, warning
+        return None, f"sell 신호이나 목표가({llm_target:.1f})가 현재가({current_price:.1f}) 이상"
 
-    # 2. 절대 범위 확인 (현재가 대비 -60% ~ +200% 초과는 이상값)
-    lower = current_price * 0.40
-    upper = current_price * 3.00
-    if not (lower <= llm_target <= upper):
-        warning = f"목표가({llm_target:.1f})가 허용 범위({lower:.1f}~{upper:.1f}) 이탈"
-        return analyst_mean or llm_target, warning
-
-    # 3. 애널리스트 컨센서스 대비 편차 확인 (60% 초과 시 블렌딩)
-    if analyst_mean and analyst_mean > 0:
-        deviation = abs(llm_target - analyst_mean) / analyst_mean
-        if deviation > 0.60:
-            blended = round((llm_target + analyst_mean) / 2, 2)
-            warning = (
-                f"LLM 목표가({llm_target:.1f})가 컨센서스({analyst_mean:.1f})와 "
-                f"{deviation*100:.0f}% 괴리 → 블렌딩({blended:.1f})"
-            )
-            return blended, warning
+    # 이상값 범위 (현재가 대비 -60% ~ +200% 초과)
+    if not (current_price * 0.40 <= llm_target <= current_price * 3.00):
+        return None, f"목표가({llm_target:.1f})가 허용 범위 이탈"
 
     return llm_target, None
 
@@ -141,13 +103,11 @@ def _atr_stop_loss(
     atr_14: float | None,
     signal: str,
     multiplier: float = 2.0,
-) -> tuple[float, str]:
-    """ATR 기반 손절가 계산.
-
-    변동성(ATR)의 2배를 현재가에서 차감 — 일반적인 추세추종 손절 기준.
-    ATR 없으면 현재가 -18% 기본값 사용.
-    """
-    if atr_14 and atr_14 > 0 and signal == "buy":
+) -> tuple[float | None, str]:
+    """ATR 기반 손절가 계산. 매수 신호에만 적용, 매도/중립은 None 반환."""
+    if signal != "buy":
+        return None, f"{signal} 신호 — 손절가 없음"
+    if atr_14 and atr_14 > 0:
         sl = round(current_price - multiplier * atr_14, 2)
         pct = (sl - current_price) / current_price * 100
         return sl, f"ATR({atr_14:.2f}) × {multiplier} → 손절가 {sl:.2f} ({pct:.1f}%)"
@@ -174,10 +134,18 @@ def extract_signal_from_report(
     llm_stop: float | None = None
     llm_horizon: str | None = None
 
+    llm_confidence: float | None = None
+
     if structured:
         raw_sig = (structured.get("signal") or "").lower()
         if raw_sig in ("buy", "hold", "sell"):
             llm_signal = raw_sig
+        try:
+            conf = structured.get("confidence")
+            if conf is not None:
+                llm_confidence = max(0.30, min(0.95, float(conf)))
+        except (TypeError, ValueError):
+            pass
         try:
             tp = structured.get("target_price")
             llm_target = float(tp) if tp is not None else None
@@ -199,20 +167,18 @@ def extract_signal_from_report(
         if m:
             llm_signal = opinion_map.get(m.group(1))
 
-    # ── Step 2: 퀀트 신호와 결합 ──────────────────────────────────────
-    if quant_score:
-        final_signal, final_confidence = _reconcile_signals(
-            llm_signal,
-            quant_score.get("signal", "hold"),
-            quant_score.get("confidence", 0.5),
-        )
+    # ── Step 2: LLM 신호·신뢰도 확정 ─────────────────────────────────
+    # LLM이 데이터만 보고 직접 판단한 결과를 그대로 사용
+    final_signal = llm_signal or "hold"
+    if llm_confidence is not None:
+        final_confidence = llm_confidence
     else:
-        final_signal = llm_signal or "hold"
+        # LLM이 confidence를 출력하지 않은 경우 eval 점수로 fallback
         basis = eval_result.get("score_normalized_100")
         final_confidence = (
-            min(float(basis) / 100.0, 1.0)
+            min(float(basis) / 100.0, 0.95)
             if basis is not None
-            else min(float(eval_result.get("total_score", 0)) / 100.0, 1.0)
+            else min(float(eval_result.get("total_score", 50)) / 100.0, 0.95)
         )
 
     # ── Step 3: 투자 기간 ────────────────────────────────────────────
@@ -223,20 +189,23 @@ def extract_signal_from_report(
         horizon_map = {"12개월": "12m", "6개월": "6m", "3개월": "3m", "1개월": "1m"}
         horizon = horizon_map.get(hm.group(1), "12m") if hm else "12m"
 
-    # ── Step 4: 목표가·손절가 검증 ───────────────────────────────────
+    # ── Step 4: 목표가·손절가 처리 ───────────────────────────────────
     cp = current_price or 0.0
-    validated_target = llm_target
-    validated_stop = llm_stop
-    if cp > 0:
-        validated_target, tp_warn = _validate_target_price(
-            llm_target, cp, analyst_mean, final_signal
-        )
-        if tp_warn:
-            print(f"[signal] ⚠️  목표가 보정: {tp_warn}")
+    ai_target: float | None = None
+    validated_stop: float | None = llm_stop
 
-        # 손절가는 ATR 기반으로 항상 새로 계산 (LLM 값 무시)
+    if cp > 0:
+        # AI 목표가: 기본 검증만, 실패 시 None (애널리스트값으로 대체 안 함)
+        ai_target, tp_warn = _validate_ai_target_price(llm_target, cp, final_signal)
+        if tp_warn:
+            print(f"[signal] ⚠️  AI 목표가: {tp_warn}")
+
+        # 손절가: ATR 기반으로 새로 계산 (LLM 값 무시)
         validated_stop, sl_msg = _atr_stop_loss(cp, atr_14, final_signal)
         print(f"[signal]    손절가: {sl_msg}")
+
+    # 애널리스트 목표가: 원본 그대로 저장
+    analyst_target = round(float(analyst_mean), 2) if analyst_mean else None
 
     bullets = _extract_section_bullets(report_text, "성장 동력")
     risks = _extract_section_bullets(report_text, "리스크 요인")
@@ -250,7 +219,8 @@ def extract_signal_from_report(
         risk_triggers=risks[:5],
         source_report=report_path,
         date=report_date,
-        target_price=validated_target,
+        target_price=ai_target,
+        analyst_target_price=analyst_target,
         stop_loss=validated_stop,
         quant_score=quant_score.get("score") if quant_score else None,
         quant_breakdown=quant_score.get("breakdown") if quant_score else None,

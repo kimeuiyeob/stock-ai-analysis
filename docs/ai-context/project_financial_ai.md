@@ -18,19 +18,18 @@ originSessionId: 83b611bd-404a-4984-abd0-3e817e19a091
 4. **EvalAgent** — 루브릭 평가 → `eval.json`
 5. **SignalAgent** — 매매 신호(buy/hold/sell) → `signal.json`, `tracking/prediction_log.csv`
 
-## 데이터 소스 (6개)
+## 데이터 소스 (5개)
 
 - yfinance (Yahoo Finance) — 가격, 재무제표, 애널리스트 정보
 - SEC EDGAR — 10-K 리스크 팩터
-- FRED — 거시경제 지표 (fed funds rate, CPI, GDP 등)
+- FRED — 거시경제 지표 (fed funds rate, CPI YoY, GDP 등)
 - Finnhub — EPS 서프라이즈, 내부자 거래
-- NewsAPI — 뉴스/감성 분석
-- Alpha Vantage — EPS 심화, 연간 손익
+- NewsAPI — 뉴스/감성 분석 (티커·회사명 관련 기사만 필터링)
 
 ## 수집 전략 (CollectAgent 2단계)
 
 1단계: yfinance 단독 실행 → company_name 확보 + **quoteType으로 ETF/레버리지 즉시 차단**  
-2단계: 나머지 5개 소스 ThreadPoolExecutor 병렬 실행
+2단계: 나머지 4개 소스 ThreadPoolExecutor 병렬 실행
 
 ## LLM 설정 (config.yaml)
 

@@ -127,7 +127,7 @@ def run_single(cfg: dict, ticker: str, date_str: str, args: argparse.Namespace) 
     agg = state["eval_result"]
     tsig = state["signal"]
 
-    print(f"\n완료: {paths['report_md']}")
+    print()
     note = agg.get("grade_note", "")
     if note:
         print(f"등급 설명: {note}")

@@ -150,6 +150,32 @@ class YahooIngester:
         except Exception:
             upgrades = []
 
+        # 애널리스트 EPS·매출 추정치 (forward-looking)
+        earnings_estimate: dict[str, Any] = {}
+        revenue_estimate: dict[str, Any] = {}
+        try:
+            ee = yf_obj.earnings_estimate
+            if ee is not None and not ee.empty:
+                for period, row in ee.iterrows():
+                    earnings_estimate[str(period)] = {
+                        k: (None if pd.isna(v) else float(v))
+                        for k, v in row.items()
+                        if k in ("avg", "low", "high", "growth")
+                    }
+        except Exception:
+            pass
+        try:
+            re = yf_obj.revenue_estimate
+            if re is not None and not re.empty:
+                for period, row in re.iterrows():
+                    revenue_estimate[str(period)] = {
+                        k: (None if pd.isna(v) else float(v))
+                        for k, v in row.items()
+                        if k in ("avg", "low", "high", "growth")
+                    }
+        except Exception:
+            pass
+
         return self._build_snapshot(
             ticker,
             hist_monthly,
@@ -163,6 +189,8 @@ class YahooIngester:
             recs,
             analyst_targets,
             upgrades,
+            earnings_estimate,
+            revenue_estimate,
         )
 
     def _build_snapshot(
@@ -179,6 +207,8 @@ class YahooIngester:
         recs: pd.DataFrame | None,
         analyst_targets: dict[str, Any] | None = None,
         upgrades: list[dict[str, Any]] | None = None,
+        earnings_estimate: dict[str, Any] | None = None,
+        revenue_estimate: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         close = price_daily["Close"]
         rolling_high = price_daily["High"].rolling(252, min_periods=1).max()
@@ -192,7 +222,10 @@ class YahooIngester:
             "marketCap",
             "trailingPE",
             "forwardPE",
+            "trailingEps",
+            "forwardEps",
             "priceToBook",
+            "priceToSales",        # P/S — 적자 기업 밸류에이션
             "profitMargins",
             "grossMargins",        # Novy-Marx 총이익률 팩터
             "revenueGrowth",
@@ -207,6 +240,11 @@ class YahooIngester:
             "freeCashflow",
             "enterpriseValue",
             "ebitda",
+            "beta",                # 시장 민감도
+            "dividendYield",       # 배당 수익률
+            "payoutRatio",         # 배당 성향
+            "shortRatio",          # 공매도 비율 (일수 기준)
+            "shortPercentOfFloat", # 유동주식 대비 공매도 비중
         ]
         info_subset = {k: info.get(k) for k in keys_info}
         atr_14 = self._compute_atr(price_daily, n=14)
@@ -233,6 +271,8 @@ class YahooIngester:
             "analyst_targets": analyst_targets or {},
             "upgrades_downgrades": upgrades or [],
             "atr_14": atr_14,
+            "earnings_estimate": earnings_estimate or {},
+            "revenue_estimate": revenue_estimate or {},
         }
 
     def _compute_atr(self, price_daily: pd.DataFrame, n: int = 14) -> float | None:

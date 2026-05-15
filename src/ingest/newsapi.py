@@ -38,7 +38,7 @@ class NewsApiIngester:
         """
         반환 구조:
         {
-            "articles": [...],      # 최근 뉴스 최대 10개
+            "articles": [...],      # 관련 뉴스 최대 10개
             "sentiment": {...},     # 감성 점수
             "top_sources": [...],   # 주요 언론사
             "error": str | None,
@@ -47,7 +47,8 @@ class NewsApiIngester:
         if not self.api_key:
             return {"error": "NEWS_API_KEY 없음", "articles": [], "sentiment": {}}
 
-        query = company_name if company_name else ticker
+        short_name = self._extract_short_name(company_name)
+        query = self._build_query(ticker, short_name)
         from_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
         try:
@@ -58,7 +59,7 @@ class NewsApiIngester:
                     "from": from_date,
                     "sortBy": "relevancy",
                     "language": "en",
-                    "pageSize": 10,
+                    "pageSize": 20,
                     "apiKey": self.api_key,
                 },
                 timeout=_TIMEOUT,
@@ -79,15 +80,47 @@ class NewsApiIngester:
                 "description": (a.get("description") or "")[:200],
             })
 
-        sentiment = self._analyze_sentiment(parsed)
-        top_sources = list({a["source"] for a in parsed if a["source"]})[:5]
+        # 관련성 필터링: 제목 또는 설명에 티커·회사명 포함된 기사만 유지
+        relevant = [a for a in parsed if self._is_relevant(a, ticker, short_name)]
+        # 관련 기사가 3개 미만이면 원본 유지 (검색 결과 자체가 적은 경우)
+        final_articles = relevant[:10] if len(relevant) >= 3 else parsed[:10]
+
+        sentiment = self._analyze_sentiment(final_articles)
+        top_sources = list({a["source"] for a in final_articles if a["source"]})[:5]
 
         return {
-            "articles": parsed,
+            "articles": final_articles,
             "sentiment": sentiment,
             "top_sources": top_sources,
             "error": None,
         }
+
+    def _extract_short_name(self, company_name: str) -> str:
+        """회사명에서 핵심 단어 추출. 예: 'NVIDIA Corporation' → 'NVIDIA'"""
+        import re
+        if not company_name:
+            return ""
+        cleaned = re.sub(
+            r'\b(Inc\.?|Corp\.?|Corporation|Ltd\.?|LLC|Limited|Co\.?|Group|Holdings?|Technologies?|Systems?|International)\b',
+            "", company_name, flags=re.IGNORECASE,
+        ).strip().rstrip(",.")
+        words = cleaned.split()
+        return words[0] if words else ""
+
+    def _build_query(self, ticker: str, short_name: str) -> str:
+        """티커와 회사 핵심명을 OR로 결합한 쿼리 생성."""
+        if short_name and short_name.lower() != ticker.lower():
+            return f'"{ticker}" OR "{short_name}"'
+        return f'"{ticker}"'
+
+    def _is_relevant(self, article: dict, ticker: str, short_name: str) -> bool:
+        """제목 또는 설명에 티커나 회사 핵심명이 포함돼 있는지 확인."""
+        text = (article.get("title", "") + " " + article.get("description", "")).lower()
+        if ticker.lower() in text:
+            return True
+        if short_name and short_name.lower() in text:
+            return True
+        return False
 
     def _analyze_sentiment(self, articles: list[dict]) -> dict[str, Any]:
         pos = neg = 0

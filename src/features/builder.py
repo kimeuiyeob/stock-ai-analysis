@@ -17,7 +17,7 @@ class FeatureBuilder:
         returns = self._compute_returns(monthly)
         valuation = self._compute_valuation(info)
         health = self._compute_health(info)
-        growth = self._compute_yoy_growth(income, annual_income)
+        growth = self._compute_yoy_growth(income, annual_income, info)
         sentiment = self._simple_news_sentiment(snapshot["news"])
         vol = self._annualized_vol(daily)
 
@@ -76,11 +76,24 @@ class FeatureBuilder:
                 ev_ebitda = round(float(ev) / float(ebitda), 2)
             except (TypeError, ValueError):
                 ev_ebitda = None
+
+        # PEG = Forward P/E ÷ 이익성장률(%) — 1.0 미만이면 성장 대비 저평가
+        peg = None
+        forward_pe = info.get("forwardPE")
+        earnings_growth = info.get("earningsGrowth")  # 소수 (예: 0.96 = 96%)
+        if forward_pe and earnings_growth and float(earnings_growth) > 0:
+            try:
+                peg = round(float(forward_pe) / (float(earnings_growth) * 100), 2)
+            except (TypeError, ValueError):
+                pass
+
         return {
             "PER": info.get("trailingPE"),
-            "Forward_PER": info.get("forwardPE"),
+            "Forward_PER": forward_pe,
             "PBR": info.get("priceToBook"),
+            "PS": info.get("priceToSales"),
             "EV_EBITDA": ev_ebitda,
+            "PEG": peg,
         }
 
     def _compute_health(self, info: dict[str, Any]) -> dict[str, Any]:
@@ -108,7 +121,9 @@ class FeatureBuilder:
             "ROA": info.get("returnOnAssets"),
         }
 
-    def _compute_yoy_growth(self, income: dict[str, Any], annual_income: dict[str, Any]) -> dict[str, Any]:
+    def _compute_yoy_growth(self, income: dict[str, Any], annual_income: dict[str, Any], info: dict[str, Any] | None = None) -> dict[str, Any]:
+        revenue_yoy: float | None = None
+
         annual_rev = annual_income.get("Total Revenue") if isinstance(annual_income, dict) else None
         if annual_rev and isinstance(annual_rev, dict):
             dates = sorted(annual_rev.keys(), reverse=True)
@@ -116,20 +131,27 @@ class FeatureBuilder:
             if len(values) >= 2:
                 now, prev = values[0], values[1]
                 if prev and not math.isclose(float(prev), 0):
-                    yoy = round((float(now) / float(prev) - 1) * 100, 2)
-                    return {"revenue_yoy_pct": yoy}
+                    revenue_yoy = round((float(now) / float(prev) - 1) * 100, 2)
 
-        rev = income.get("Total Revenue") if isinstance(income, dict) else None
-        if rev and isinstance(rev, dict):
-            dates = sorted(rev.keys(), reverse=True)
-            values = [rev[d] for d in dates]
-            if len(values) >= 5:
-                now_q, prev_q = values[0], values[4]
-                if prev_q and not math.isclose(float(prev_q), 0):
-                    yoy = round((float(now_q) / float(prev_q) - 1) * 100, 2)
-                    return {"revenue_yoy_pct": yoy}
+        if revenue_yoy is None:
+            rev = income.get("Total Revenue") if isinstance(income, dict) else None
+            if rev and isinstance(rev, dict):
+                dates = sorted(rev.keys(), reverse=True)
+                values = [rev[d] for d in dates]
+                if len(values) >= 5:
+                    now_q, prev_q = values[0], values[4]
+                    if prev_q and not math.isclose(float(prev_q), 0):
+                        revenue_yoy = round((float(now_q) / float(prev_q) - 1) * 100, 2)
 
-        return {"revenue_yoy_pct": None}
+        result: dict[str, Any] = {"revenue_yoy_pct": revenue_yoy}
+
+        if info:
+            eg = info.get("earningsGrowth")
+            rg = info.get("revenueGrowth")
+            result["earnings_growth_fwd"] = round(float(eg) * 100, 1) if eg is not None else None
+            result["revenue_growth_fwd"]  = round(float(rg) * 100, 1) if rg is not None else None
+
+        return result
 
     # ── 퀀트 점수 (100점) ─────────────────────────────────────────────
     #

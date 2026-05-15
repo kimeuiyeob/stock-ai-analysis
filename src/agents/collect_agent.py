@@ -18,7 +18,6 @@ from ingest.edgar import EdgarIngester
 from ingest.fred import FredIngester
 from ingest.finnhub import FinnhubIngester
 from ingest.newsapi import NewsApiIngester
-from ingest.alphavantage import AlphaVantageIngester
 
 from .base import BaseAgent
 
@@ -36,7 +35,7 @@ class CollectAgent(BaseAgent):
 
         # ── 1단계: yfinance 단독 실행 ────────────────────────────────────────
         # company_name이 NewsAPI 검색어로 필요하고, 실패 시 파이프라인 즉시 중단
-        self.log(f"[1/6] yfinance 수집 → {ticker}")
+        self.log(f"[1/5] yfinance 수집 → {ticker}")
         yf_data = YahooIngester().fetch(ticker, cfg)
         write_json(raw_dir / "yfinance.json", yf_data)
         self.log(f"  → raw/yfinance.json 저장 (종가≈{yf_data['price']['current']})")
@@ -62,7 +61,7 @@ class CollectAgent(BaseAgent):
 
         # ── 2단계: 나머지 5개 병렬 수집 ─────────────────────────────────────
         def _edgar() -> tuple[str, dict]:
-            self.log(f"[2/6] SEC EDGAR 10-K 리스크 팩터 수집 → {ticker}")
+            self.log(f"[2/5] SEC EDGAR 10-K 리스크 팩터 수집 → {ticker}")
             data = EdgarIngester().fetch(ticker)
             write_json(raw_dir / "edgar.json", data)
             if data.get("error"):
@@ -75,7 +74,7 @@ class CollectAgent(BaseAgent):
             return "edgar", data
 
         def _fred() -> tuple[str, dict]:
-            self.log("[3/6] FRED 거시경제 지표 수집")
+            self.log("[3/5] FRED 거시경제 지표 수집")
             data = FredIngester().fetch()
             write_json(raw_dir / "fred.json", data)
             if data.get("error"):
@@ -85,7 +84,7 @@ class CollectAgent(BaseAgent):
             return "fred", data
 
         def _finnhub() -> tuple[str, dict]:
-            self.log(f"[4/6] Finnhub EPS·내부자 거래 수집 → {ticker}")
+            self.log(f"[4/5] Finnhub EPS·내부자 거래 수집 → {ticker}")
             data = FinnhubIngester().fetch(ticker)
             write_json(raw_dir / "finnhub.json", data)
             if data.get("error"):
@@ -97,7 +96,7 @@ class CollectAgent(BaseAgent):
             return "finnhub", data
 
         def _newsapi() -> tuple[str, dict]:
-            self.log(f"[5/6] NewsAPI 뉴스 수집 → {company_name}")
+            self.log(f"[5/5] NewsAPI 뉴스 수집 → {company_name}")
             data = NewsApiIngester().fetch(ticker, company_name)
             write_json(raw_dir / "newsapi.json", data)
             if data.get("error"):
@@ -110,22 +109,8 @@ class CollectAgent(BaseAgent):
                 )
             return "newsapi", data
 
-        def _alphavantage() -> tuple[str, dict]:
-            self.log(f"[6/6] Alpha Vantage EPS·재무 심화 수집 → {ticker}")
-            data = AlphaVantageIngester().fetch(ticker)
-            write_json(raw_dir / "alphavantage.json", data)
-            if data.get("error"):
-                self.log(f"  → raw/alphavantage.json 저장 (오류: {data['error']})")
-            else:
-                eps_list = data.get("earnings", {}).get("quarterly_eps", [])
-                self.log(
-                    f"  → raw/alphavantage.json 저장 | EPS {len(eps_list)}분기 | "
-                    f"연간 손익 {len(data.get('annual_income', []))}년"
-                )
-            return "alphavantage", data
-
         results: dict[str, Any] = {}
-        tasks = [_edgar, _fred, _finnhub, _newsapi, _alphavantage]
+        tasks = [_edgar, _fred, _finnhub, _newsapi]
 
         with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
             futures = {executor.submit(fn): fn.__name__ for fn in tasks}
@@ -141,13 +126,12 @@ class CollectAgent(BaseAgent):
         # ── 3단계: snapshot.json 합본 저장 ───────────────────────────────────
         snapshot = {
             **yf_data,
-            "edgar":        results.get("edgar", {}),
-            "fred":         results.get("fred", {}),
-            "finnhub":      results.get("finnhub", {}),
-            "newsapi":      results.get("newsapi", {}),
-            "alphavantage": results.get("alphavantage", {}),
+            "edgar":   results.get("edgar", {}),
+            "fred":    results.get("fred", {}),
+            "finnhub": results.get("finnhub", {}),
+            "newsapi": results.get("newsapi", {}),
         }
         write_json(paths["artifacts_dir"] / "snapshot.json", snapshot)
-        self.log("snapshot.json 저장 완료 (6개 소스 합본) → 다음 Agent 진행")
+        self.log("snapshot.json 저장 완료 (5개 소스 합본) → 다음 Agent 진행")
 
         return {**input_data, "snapshot": snapshot}

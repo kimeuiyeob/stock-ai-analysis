@@ -20,9 +20,9 @@ st.set_page_config(page_title="Financial AI", page_icon="📈", layout="wide")
 
 st.markdown("""
 <style>
-/* metric 값 글자 살짝 축소 */
+/* metric 값 글자 크기 */
 [data-testid="stMetricValue"] {
-    font-size: 1.6rem !important;
+    font-size: 1.9rem !important;
 }
 
 /* selectbox 테두리 */
@@ -139,6 +139,7 @@ def load_latest_signals() -> list[dict]:
                 "current_price": current_price,
                 "quant_score": sig.get("quant_score"),
                 "target_price": sig.get("target_price"),
+                "analyst_target_price": sig.get("analyst_target_price"),
                 "stop_loss": sig.get("stop_loss"),
                 "time_horizon": sig.get("time_horizon", "-"),
                 "eval_score": ev.get("total_score"),
@@ -242,23 +243,11 @@ if page == "📊 대시보드":
                 st.write("")
 
                 m1, m2 = st.columns(2)
-                m1.metric("신뢰도", f"{sig['confidence']:.1%}",
-                    help=(
-                        "퀀트 점수 기반 기준 신뢰도:\n"
-                        "  • 매수(60 ~ 100점): 0.50 → 0.95 선형 스케일\n"
-                        "  • 매도(0 ~ 40점): 0.50 → 0.95 선형 스케일\n"
-                        "  • 중립(40 ~ 60점): 50점=0.65, 경계=0.50\n"
-                        "LLM·퀀트 신호 일치 → ×1.15 (최대 0.95)\n"
-                        "한쪽이 중립 → ×0.70 (최소 0.35)\n"
-                        "완전 반대(매수↔매도) → 0.35 고정"
-                    ))
+                m1.metric("신뢰도", f"{sig['confidence']:.0%}",
+                    help="AI가 이 투자 판단에 얼마나 확신하는지를 나타냅니다.")
                 if sig["quant_score"] is not None:
                     m2.metric("퀀트", f"{sig['quant_score']}/100",
-                        help=(
-                            "밸류에이션(20)+퀄리티(25)+모멘텀(20)+재무건전성(20)+성장성(15) 합산\n"
-                            "≥60점 → 매수 / 40 ~ 59점 → 중립 / <40점 → 매도\n"
-                            "데이터 누락 항목은 만점의 절반(중립값)으로 처리됩니다."
-                        ))
+                        help="밸류에이션·수익성·모멘텀·재무건전성·성장성을 종합한 재무 점수입니다.")
 
                 if sig["quant_score"] is not None:
                     st.progress(
@@ -266,40 +255,37 @@ if page == "📊 대시보드":
                         text=f"퀀트 점수 {sig['quant_score']}점",
                     )
 
-                p1, p2, p3 = st.columns(3)
-                upside = None
-                if sig["target_price"] and sig["current_price"]:
-                    upside = (sig["target_price"] / sig["current_price"] - 1) * 100
+                # 1행: 현재가 · 손절가
+                r1c1, r1c2 = st.columns(2)
                 if sig["current_price"]:
-                    p1.metric(
+                    r1c1.metric(
                         "현재가", _fmt_price(sig["current_price"]),
-                        delta=f"{upside:+.0f}%" if upside is not None else None,
-                        help=(
-                            "분석 시점의 시장 거래가입니다.\n"
-                            "△ 수치는 목표가 대비 예상 상승여력을 나타냅니다."
-                        ),
-                    )
-                if sig["target_price"]:
-                    p2.metric(
-                        "목표가", _fmt_price(sig["target_price"]),
-                        help=(
-                            "AI 리포트에서 추출한 12개월 기준 목표주가입니다.\n"
-                            "① 방향 검증 — 매수 신호인데 목표가가 현재가 이하면 폐기\n"
-                            "② 범위 검증 — 현재가 대비 −60%~+200% 이탈 시 폐기\n"
-                            "③ 컨센서스 대조 — 월가 평균과 60% 이상 괴리 시 두 값의 평균으로 자동 보정\n"
-                            "목표가 산출 불가 시 월가 애널리스트 평균 컨센서스로 대체됩니다."
-                        ),
+                        help="분석 시점의 시장 거래가입니다.",
                     )
                 if sig["stop_loss"]:
-                    p3.metric(
+                    r1c2.metric(
                         "손절가", _fmt_price(sig["stop_loss"]),
-                        help=(
-                            "14일 ATR(평균 실질 변동폭) × 2배를 현재가에서 차감하여 산출합니다.\n"
-                            "변동성이 클수록 손절 폭이 넓어지고, 안정적인 종목은 좁게 설정됩니다.\n"
-                            "ATR 데이터 없을 경우 현재가 −18%를 기본값으로 사용합니다.\n"
-                            "매수(buy) 신호에만 적용됩니다."
-                        ),
+                        help="매수 시 손실을 제한하기 위한 기준 가격입니다. 매수 신호에만 표시됩니다.",
                     )
+
+                # 2행: AI 목표가 · Analyst 목표가
+                r2c1, r2c2 = st.columns(2)
+                ai_tp = sig.get("target_price")
+                an_tp = sig.get("analyst_target_price")
+                ai_upside = (ai_tp / sig["current_price"] - 1) * 100 if ai_tp and sig["current_price"] else None
+                an_upside = (an_tp / sig["current_price"] - 1) * 100 if an_tp and sig["current_price"] else None
+                r2c1.metric(
+                    "AI 목표가",
+                    _fmt_price(ai_tp) if ai_tp else "—",
+                    delta=f"{ai_upside:+.0f}%" if ai_upside is not None else None,
+                    help="AI가 재무 데이터만으로 산출한 12개월 목표 주가입니다.",
+                )
+                r2c2.metric(
+                    "Analyst 목표가",
+                    _fmt_price(an_tp) if an_tp else "—",
+                    delta=f"{an_upside:+.0f}%" if an_upside is not None else None,
+                    help="월가 애널리스트 컨센서스 평균 목표 주가입니다.",
+                )
 
                 if sig["eval_score"] is not None:
                     st.caption(
@@ -312,54 +298,11 @@ if page == "📊 대시보드":
                     with st.expander("퀀트 세부 점수"):
                         bd = sig["breakdown"]
                         _QUANT_HELP = {
-                            "밸류에이션": (
-                                "만점 20점 | Greenblatt Magic Formula 기반\n"
-                                "EV/EBITDA (10점): 자본구조·세율 왜곡 없는 절대 저평가 지표\n"
-                                "  일반: ≤8배→10점 / ≤12배→8점 / ≤16배→6점 / ≤22배→3점\n"
-                                "  유틸리티·에너지: ≤12배→10점 / ≤18배→8점 / ≤25배→6점 / ≤35배→3점\n"
-                                "  (인프라 투자 특성상 배수가 높은 게 정상 — 기준 완화)\n"
-                                "FCF 수익률 (6점): 주주 실질 현금 수익률\n"
-                                "  >7%→6점 / >4%→5점 / >2%→3점 / >0%→1점\n"
-                                "Forward PER (4점): 컨센서스 이익 기준 상대 저평가\n"
-                                "  ≤12배→4점 / ≤17배→3점 / ≤22배→2점 / ≤30배→1점"
-                            ),
-                            "퀄리티": (
-                                "만점 25점 | Novy-Marx(2013) + Fama-French RMW 팩터\n"
-                                "총이익률 (5점): 가격결정력 — Novy-Marx의 핵심 품질 지표\n"
-                                "  >55%→5점 / >35%→3점 / >15%→1점\n"
-                                "영업이익률 (8점): 핵심 사업 경쟁력\n"
-                                "  >25%→8점 / >15%→6점 / >8%→4점 / >0%→2점\n"
-                                "ROE (7점): 자기자본 효율 — Fama-French RMW 대표 지표\n"
-                                "  >25%→7점 / >15%→5점 / >8%→3점 / >0%→1점\n"
-                                "ROA (5점): 총자산 효율 — 레버리지로 부풀린 ROE 보완\n"
-                                "  >15%→5점 / >8%→4점 / >4%→2점 / >0%→1점"
-                            ),
-                            "모멘텀": (
-                                "만점 20점 | Jegadeesh & Titman(1993) 검증 시그널\n"
-                                "12-1개월 수익률 (12점): 핵심 — 최근 1개월 제외(단기 역전 회피)\n"
-                                "  >30%→12점 / >15%→9점 / >5%→6점 / >0%→3점\n"
-                                "6-1개월 수익률 (8점): 중기 모멘텀 확인\n"
-                                "  >15%→8점 / >5%→6점 / >0%→3점"
-                            ),
-                            "재무건전성": (
-                                "만점 20점 | Piotroski F-Score + Altman Z-Score 개념\n"
-                                "순부채/FCF 상환연수 (8점): 실질 부채 상환 능력\n"
-                                "  순현금→8점 / ≤2년→6점 / ≤4년→4점 / ≤7년→2점\n"
-                                "Debt/Equity (7점): yfinance % 기준\n"
-                                "  ≤20%→7점 / ≤50%→5점 / ≤100%→3점 / ≤200%→1점\n"
-                                "FCF 품질 (5점): Piotroski 발생액 신호\n"
-                                "  FCF>0→+3점, FCF≥순이익×80%→+2점(이익의 질 우수)\n"
-                                "※ 금융·부동산 섹터는 D/E·순부채 항목 중립 처리\n"
-                                "  (레버리지가 사업 특성상 높은 게 정상이므로 불이익 없음)"
-                            ),
-                            "성장성": (
-                                "만점 15점\n"
-                                "매출 YoY (9점): 재무제표 기반 연간 매출 성장률\n"
-                                "  >25%→9점 / >15%→7점 / >7%→4점 / >0%→1점\n"
-                                "EPS 성장률 (6점): yfinance earningsGrowth (YoY)\n"
-                                "  >25%→6점 / >10%→4점 / >0%→2점\n"
-                                "※ 데이터 누락 항목은 만점의 절반(중립값)으로 처리됩니다."
-                            ),
+                            "밸류에이션": "현재 주가가 기업 가치 대비 얼마나 저렴한지 측정합니다.",
+                            "퀄리티":     "기업의 수익성과 사업 경쟁력을 측정합니다.",
+                            "모멘텀":     "최근 주가 상승 흐름의 강도를 측정합니다.",
+                            "재무건전성": "부채 수준과 현금흐름의 안정성을 측정합니다.",
+                            "성장성":     "매출과 이익의 성장 속도를 측정합니다.",
                         }
                         rows = [
                             ("밸류에이션",  bd.get("valuation", 0), 20),
@@ -418,43 +361,25 @@ elif page == "📄 리포트":
                     "현재가", f"${current_price:,.1f}",
                     help="분석 시점의 시장 거래가입니다.",
                 )
-            st.metric("신뢰도", f"{sig.get('confidence', 0):.1%}",
-                help=(
-                    "퀀트 점수 기반 기준 신뢰도:\n"
-                    "  • 매수(60 ~ 100점): 0.50 → 0.95 선형 스케일\n"
-                    "  • 매도(0 ~ 40점): 0.50 → 0.95 선형 스케일\n"
-                    "  • 중립(40 ~ 60점): 50점=0.65, 경계=0.50\n"
-                    "LLM·퀀트 신호 일치 → ×1.15 (최대 0.95)\n"
-                    "한쪽이 중립 → ×0.70 (최소 0.35)\n"
-                    "완전 반대(매수↔매도) → 0.35 고정"
-                ))
+            st.metric("신뢰도", f"{sig.get('confidence', 0):.0%}",
+                help="AI가 이 투자 판단에 얼마나 확신하는지를 나타냅니다.")
             if sig.get("quant_score") is not None:
                 st.metric("퀀트 점수", f"{sig['quant_score']}/100",
-                    help=(
-                        "밸류에이션(20)+퀄리티(25)+모멘텀(20)+재무건전성(20)+성장성(15) 합산\n"
-                        "≥60점 → 매수 / 40 ~ 59점 → 중립 / <40점 → 매도\n"
-                        "데이터 누락 항목은 만점의 절반(중립값)으로 처리됩니다."
-                    ))
-            if sig.get("target_price"):
-                st.metric(
-                    "목표가", f"${sig['target_price']:,.1f}",
-                    help=(
-                        "AI 리포트에서 추출한 12개월 기준 목표주가입니다.\n"
-                        "① 방향 검증 — 매수 신호인데 목표가가 현재가 이하면 폐기\n"
-                        "② 범위 검증 — 현재가 대비 −60%~+200% 이탈 시 폐기\n"
-                        "③ 컨센서스 대조 — 월가 평균과 60% 이상 괴리 시 두 값의 평균으로 자동 보정\n"
-                        "목표가 산출 불가 시 월가 애널리스트 평균 컨센서스로 대체됩니다."
-                    ),
-                )
+                    help="밸류에이션·수익성·모멘텀·재무건전성·성장성을 종합한 재무 점수입니다.")
             if sig.get("stop_loss"):
                 st.metric(
                     "손절가", f"${sig['stop_loss']:,.1f}",
-                    help=(
-                        "14일 ATR(평균 실질 변동폭) × 2배를 현재가에서 차감하여 산출합니다.\n"
-                        "변동성이 클수록 손절 폭이 넓어지고, 안정적인 종목은 좁게 설정됩니다.\n"
-                        "ATR 데이터 없을 경우 현재가 −18%를 기본값으로 사용합니다.\n"
-                        "매수(buy) 신호에만 적용됩니다."
-                    ),
+                    help="매수 시 손실을 제한하기 위한 기준 가격입니다. 매수 신호에만 표시됩니다.",
+                )
+            if sig.get("target_price"):
+                st.metric(
+                    "AI 목표가", f"${sig['target_price']:,.1f}",
+                    help="AI가 재무 데이터만으로 산출한 12개월 목표 주가입니다.",
+                )
+            if sig.get("analyst_target_price"):
+                st.metric(
+                    "Analyst 목표가", f"${sig['analyst_target_price']:,.1f}",
+                    help="월가 애널리스트 컨센서스 평균 목표 주가입니다.",
                 )
 
         if eval_path.exists():
@@ -688,7 +613,7 @@ elif page == "📈 예측 이력":
         key="history_df",
         column_config={
             "opinion": st.column_config.TextColumn("신호"),
-            "confidence": st.column_config.NumberColumn("신뢰도", format="%.2f"),
+            "confidence": st.column_config.NumberColumn("신뢰도", format="%.0%%"),
             "quant_score": st.column_config.ProgressColumn("퀀트", min_value=0, max_value=100),
             "price_at_report": st.column_config.NumberColumn("분석 시 가격", format="$%.2f"),
             "target_price": st.column_config.NumberColumn("목표가", format="$%.1f"),

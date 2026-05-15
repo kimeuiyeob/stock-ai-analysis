@@ -44,34 +44,59 @@ class ContextBuilder:
                 "recent_headlines": [n.get("title", "") for n in snapshot["news"][:5]],
                 "sentiment": features["sentiment"],
             },
-            "analyst_consensus": snapshot["analyst_recs"],
+            "analyst_consensus": self._build_analyst_consensus(snapshot.get("analyst_recs") or {}),
             "analyst_targets": self._build_analyst_targets(snapshot),
+            "forward_estimates": self._build_forward_estimates(snapshot),
+            "risk_profile": self._build_risk_profile(snapshot),
             "sec_edgar": self._build_edgar_context(snapshot.get("edgar")),
             "macro": self._build_macro_context(snapshot.get("fred")),
             "finnhub": self._build_finnhub_context(snapshot.get("finnhub")),
             "news": self._build_news_context(snapshot.get("newsapi")),
-            "alphavantage": self._build_av_context(snapshot.get("alphavantage")),
-            "quant_signal": features.get("quant"),
+        }
+
+    def _build_analyst_consensus(self, recs: dict) -> dict:
+        """애널리스트 매수/중립/매도 방향성 카운트만 포함. 목표가 숫자 제외."""
+        return {
+            "strongBuy":  recs.get("strongBuy"),
+            "buy":        recs.get("buy"),
+            "hold":       recs.get("hold"),
+            "sell":       recs.get("sell"),
+            "strongSell": recs.get("strongSell"),
         }
 
     def _build_analyst_targets(self, snapshot: dict) -> dict:
-        """yfinance analyst_price_targets + upgrades_downgrades 통합."""
-        at = snapshot.get("analyst_targets") or {}
+        """등급 변경 이력만 포함. 목표가 숫자는 LLM에게 노출하지 않음."""
         ug = snapshot.get("upgrades_downgrades") or []
-        # Alpha Vantage overview의 AnalystTargetPrice를 보조 참고값으로 활용
-        av_target = None
-        av = snapshot.get("alphavantage") or {}
-        if av and not av.get("error"):
-            av_target = (av.get("overview") or {}).get("analyst_target_price")
-
         return {
-            "available": bool(at.get("mean") or av_target),
-            "mean":   at.get("mean"),
-            "median": at.get("median"),
-            "high":   at.get("high"),
-            "low":    at.get("low"),
-            "av_mean": av_target,          # Alpha Vantage 보조값
-            "recent_changes": ug[:5],      # 최근 5건 등급 변경
+            "recent_changes": ug[:5],
+        }
+
+    def _build_forward_estimates(self, snapshot: dict) -> dict:
+        """애널리스트 EPS·매출 추정치 (forward-looking)."""
+        ee = snapshot.get("earnings_estimate") or {}
+        re = snapshot.get("revenue_estimate") or {}
+        if not ee and not re:
+            return {"available": False}
+        return {
+            "available": True,
+            "eps_estimate": ee,
+            "revenue_estimate": re,
+        }
+
+    def _build_risk_profile(self, snapshot: dict) -> dict:
+        """베타·공매도·배당 등 리스크 프로파일."""
+        info = snapshot.get("info") or {}
+        beta = info.get("beta")
+        short_ratio = info.get("shortRatio")
+        short_pct = info.get("shortPercentOfFloat")
+        div_yield = info.get("dividendYield")
+        payout = info.get("payoutRatio")
+        return {
+            "beta": round(float(beta), 2) if beta is not None else None,
+            "short_ratio_days": round(float(short_ratio), 1) if short_ratio is not None else None,
+            "short_pct_float": round(float(short_pct) * 100, 1) if short_pct is not None else None,
+            "dividend_yield_pct": round(float(div_yield) * 100, 2) if div_yield is not None else None,
+            "payout_ratio": round(float(payout) * 100, 1) if payout is not None else None,
         }
 
     def _build_edgar_context(self, edgar: dict | None) -> dict:
@@ -126,16 +151,6 @@ class ContextBuilder:
             "articles": newsapi.get("articles", [])[:5],
             "sentiment": newsapi.get("sentiment", {}),
             "top_sources": newsapi.get("top_sources", []),
-        }
-
-    def _build_av_context(self, av: dict | None) -> dict:
-        if not av or av.get("error"):
-            return {"available": False}
-        return {
-            "available": True,
-            "overview": av.get("overview", {}),
-            "earnings": av.get("earnings", {}),
-            "annual_income": av.get("annual_income", []),
         }
 
     def check_token_budget(self, context: dict[str, Any]) -> dict[str, Any]:
